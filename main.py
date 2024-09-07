@@ -1,4 +1,4 @@
-from os import rename, path, remove, listdir, walk
+from os import path, remove, listdir, mkdir, rename, walk
 from sys import exit
 from zipfile import ZipFile
 import re
@@ -11,6 +11,10 @@ def main() -> None:
     if ending != ".xlsx":
         exit("Wrong file type entered.")
 
+    # Extract file name and create new compressed name
+    filename = base_dir.split("\\")[-1]
+    new_filename = filename + "_removed.xlsx"
+
     # Change to zip
     zip_dir: str = base_dir + ".zip"
     rename(input_dir, zip_dir)
@@ -18,72 +22,66 @@ def main() -> None:
     # Extract zip
     # Create path to extracting files
     splits_dir = base_dir.split("\\")
-    extract_dir = path.join("\\".join(splits_dir[:-1]), "extracted")
+    extract_dir = path.join("\\".join(splits_dir[:-1])) + "\\extracted"
+    # Create extraction directory if it doesn't exist
+    mkdir(extract_dir)  # Handle existing directory case
 
     # Extract into path
     with ZipFile(zip_dir, "r") as f:
         f.extractall(path=extract_dir)
 
-    # Remove old zip file
+    # Delete old zip file
     remove(zip_dir)
 
-    # Path to Excel sheet (.xml) files
-    sheets_dir: str = path.join(extract_dir, "xl", "worksheets")
-    workbook_file: str = path.join(extract_dir, "xl", "workbook.xml")
+    # Remove protection in sheets
+    sheets_dir = extract_dir + "\\xl\\worksheets\\"
+    protection_pattern = re.compile(r'<sheetProtection[^>]*>', re.IGNORECASE)  # Simplified pattern
 
-    # Define regex patterns to remove sheet and workbook protection
-    sheet_protection_pattern = re.compile(r'<sheetProtection[^>]*>.*?</sheetProtection>', re.DOTALL)
-    workbook_protection_pattern = re.compile(r'<workbookProtection[^>]*>.*?</workbookProtection>', re.DOTALL)
+    for i in range(1, len(listdir(sheets_dir)) + 1):  # Loop through sheet files efficiently
+        sheet_path = f"{sheets_dir}sheet{i}.xml"
 
-    # Remove protection from sheet XML files
-    xml_files = [f for f in listdir(sheets_dir) if f.endswith(".xml")]
-    for xml_file in xml_files:
-        file_path = path.join(sheets_dir, xml_file)
+        try:
+            # Read the content of the sheet XML file
+            with open(sheet_path, "r", encoding="utf-8") as f:
+                content = f.read()
 
-        # Read the content of the sheet XML file
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+            # Remove <sheetProtection> tag and everything until the next >
+            modified_content = protection_pattern.sub('', content)
 
-        # Remove the <sheetProtection> tag using regex
-        modified_content = re.sub(sheet_protection_pattern, '', content)
+            # Write the modified content back to the sheet XML file
+            with open(sheet_path, "w", encoding="utf-8") as f:
+                f.write(modified_content)
 
-        # Write the modified content back to the sheet XML file
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(modified_content)
+        except FileNotFoundError:
+            pass  # No need to print anything here
 
-    # Remove protection from workbook XML file
-    if path.exists(workbook_file):
-        with open(workbook_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+    # Remove file-sharing from workbook.xml
+    workbook_path = extract_dir + "\\workbook.xml"
+    filesharing_pattern = re.compile(r'<fileSharing>', re.IGNORECASE)
 
-        # Remove the <workbookProtection> tag using regex
-        modified_content = re.sub(workbook_protection_pattern, '', content)
+    try:
+        with open(workbook_path, "r", encoding="utf-8") as f:
+            workbook_content = f.read()
 
-        # Write the modified content back to the workbook XML file
-        with open(workbook_file, 'w', encoding='utf-8') as f:
-            f.write(modified_content)
+        workbook_content = filesharing_pattern.sub('', workbook_content)
 
-    # Rename the extracted folder with "_removed" to indicate the protection is removed
-    new_excel_path = base_dir + "_removed.xlsx"
+        with open(workbook_path, "w", encoding="utf-8") as f:
+            f.write(workbook_content)
 
-    # Create a new zip file from the modified folder
-    new_zip_dir = base_dir + "_removed.zip"
+    except FileNotFoundError:
+        pass  # Handle missing workbook.xml
 
-    with ZipFile(new_zip_dir, 'w') as new_zip:
-        # Walk through the extracted directory and add files back to the zip
-        for foldername, subfolders, filenames in walk(extract_dir):
-            for filename in filenames:
-                # Construct the full file path
-                file_path = path.join(foldername, filename)
-                # Get the relative path to preserve folder structure
-                relative_path = path.relpath(file_path, extract_dir)
-                new_zip.write(file_path, relative_path)
+    # Create a new compressed file
+    with ZipFile(new_filename, "w") as zip_file:
+        for root, _, files in walk(extract_dir):
+            for file in files:
+                zip_file.write(path.join(root, file), path.relpath(path.join(root, file), extract_dir))
 
-    # Rename the zip back to .xlsx
-    rename(new_zip_dir, new_excel_path)
+    # Delete the temporary extracted directory
+    remove(extract_dir)
 
-    # Print success message
-    print(f"Excel sheets and workbook protection removed successfully. New file saved as: {new_excel_path}")
+    print("Protection and file-sharing removed")
+    print("New file:", new_filename)  # Print the new filename
 
 
 if __name__ == "__main__":
