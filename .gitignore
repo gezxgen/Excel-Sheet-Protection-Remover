@@ -156,3 +156,9 @@ cython_debug/
 
 # PyCharm
 .idea/
+
+# Excel
+Book1.xlsx
+test.xlsx
+test_.xlsx
+test.zip
